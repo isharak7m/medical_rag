@@ -22,6 +22,7 @@ from db.schemas import (
     RichQueryResponse,
     Stance,
     Verdict,
+    RelevanceLabel,
 )
 from utils.logger import get_logger
 
@@ -87,6 +88,7 @@ def _build_evidence_cards(
                 stance=claim.stance if claim else Stance.NEUTRAL,
                 relevance_score=round(score / max_score, 3) if max_score > 0 else 0.0,
                 sample_size=paper.sample_size,
+                relevance_label=claim.relevance_label if claim else RelevanceLabel.DIRECTLY_RELEVANT,
             )
         )
     return cards

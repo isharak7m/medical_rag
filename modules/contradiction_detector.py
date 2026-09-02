@@ -1,12 +1,13 @@
 """
 Detect whether evidence is genuinely mixed rather than merely containing a minority dissent.
+Only flags contradictions when papers address the SAME outcome.
 """
 
 from __future__ import annotations
 
 from typing import List
 
-from db.schemas import ContradictionReport, RankedEvidence, Stance
+from db.schemas import ContradictionReport, RankedEvidence, Stance, RelevanceLabel
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -34,15 +35,31 @@ def detect_contradictions(
     total = len(ranked)
     direct_total = support + oppose
 
+    directly_relevant_support = sum(
+        1 for item in ranked
+        if item.claim.stance == Stance.SUPPORT
+        and getattr(item.claim, 'relevance_label', None) == RelevanceLabel.DIRECTLY_RELEVANT
+    )
+    directly_relevant_oppose = sum(
+        1 for item in ranked
+        if item.claim.stance == Stance.OPPOSE
+        and getattr(item.claim, 'relevance_label', None) == RelevanceLabel.DIRECTLY_RELEVANT
+    )
+
     minority_ratio = min(support, oppose) / direct_total if direct_total else 0.0
-    has_conflict = support >= 1 and oppose >= 1 and minority_ratio >= _MEANINGFUL_MINORITY_RATIO
+    has_conflict = (
+        support >= 1 and oppose >= 1
+        and minority_ratio >= _MEANINGFUL_MINORITY_RATIO
+        and directly_relevant_support >= 1 and directly_relevant_oppose >= 1
+    )
 
     low_retrieval = retrieval_score < 0.10
     small_sample = total < _MIN_PAPERS_FOR_CERTAINTY
 
     if has_conflict:
         scope_note = (
-            f"{support} studies support and {oppose} oppose this claim. "
+            f"{support} studies support and {oppose} oppose this claim "
+            f"({directly_relevant_support} directly relevant support, {directly_relevant_oppose} directly relevant oppose). "
             "The evidence is genuinely mixed across study conditions."
         )
         logger.info(f"Contradiction detected: support={support}, oppose={oppose}, neutral={neutral}")

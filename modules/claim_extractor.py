@@ -8,7 +8,7 @@ import json
 import re
 from typing import List
 
-from db.schemas import Claim, Paper, Stance
+from db.schemas import Claim, Paper, Stance, RelevanceLabel
 from services.query_intent import QueryIntent, build_query_intent
 from utils.logger import get_logger
 from utils.text_cleaning import truncate
@@ -131,6 +131,35 @@ def _heuristic_query_stance(query: str, paper: Paper, intent: QueryIntent | None
     return _map_raw_to_query_stance(intent, raw)
 
 
+def _check_intervention_match(intent: QueryIntent, paper: Paper) -> bool:
+    if not intent or not intent.intervention_terms:
+        return False
+    text = f"{paper.title} {paper.abstract}".lower()
+    return any(term.lower() in text for term in intent.intervention_terms)
+
+
+def _check_outcome_match(intent: QueryIntent, paper: Paper) -> bool:
+    if not intent or not intent.outcome_terms:
+        return False
+    text = f"{paper.title} {paper.abstract}".lower()
+    return any(term.lower() in text for term in intent.outcome_terms)
+
+
+def _classify_relevance(intent: QueryIntent | None, paper: Paper, stance: Stance) -> RelevanceLabel:
+    if not intent:
+        return RelevanceLabel.DIRECTLY_RELEVANT
+
+    intervention_match = _check_intervention_match(intent, paper)
+    outcome_match = _check_outcome_match(intent, paper)
+
+    if intervention_match and outcome_match:
+        return RelevanceLabel.DIRECTLY_RELEVANT
+    elif intervention_match or outcome_match:
+        return RelevanceLabel.INDIRECTLY_RELEVANT
+    else:
+        return RelevanceLabel.CONTEXTUAL
+
+
 def _llm_classify_stances_batch(query: str, papers: list, llm_generate) -> list[Stance]:
     intent = build_query_intent(query)
     papers_block = "\n\n".join(
@@ -187,6 +216,9 @@ def extract_claims(
             paper_title=paper.title,
             claim_text=_extract_key_sentence(paper.abstract),
             stance=stance,
+            relevance_label=_classify_relevance(intent, paper, stance),
+            intervention_match=_check_intervention_match(intent, paper) if intent else False,
+            outcome_match=_check_outcome_match(intent, paper) if intent else False,
         )
         for paper, stance in zip(papers, stances)
     ]

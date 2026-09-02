@@ -36,11 +36,21 @@ class Paper(BaseModel):
     sample_size: Optional[int] = None
 
 
+class RelevanceLabel(str, Enum):
+    DIRECTLY_RELEVANT = "directly_relevant"
+    INDIRECTLY_RELEVANT = "indirectly_relevant"
+    CONTEXTUAL = "contextual"
+    IRRELEVANT = "irrelevant"
+
+
 class Claim(BaseModel):
     paper_pmid: str
     paper_title: str
     claim_text: str
     stance: Stance
+    relevance_label: RelevanceLabel = RelevanceLabel.DIRECTLY_RELEVANT
+    intervention_match: bool = False
+    outcome_match: bool = False
 
 
 class RankedEvidence(BaseModel):
@@ -97,6 +107,7 @@ class EvidenceCard(BaseModel):
     stance: Stance
     relevance_score: float
     sample_size: Optional[int]
+    relevance_label: RelevanceLabel = RelevanceLabel.DIRECTLY_RELEVANT
 
 
 class ContradictionSummary(BaseModel):
@@ -132,6 +143,10 @@ class PipelineDiagnostics(BaseModel):
     direct_evidence_ratio: float = 0.0
     cache_hit: bool = False
     notes: List[str] = Field(default_factory=list)
+    directly_relevant_count: int = 0
+    indirectly_relevant_count: int = 0
+    irrelevant_count: int = 0
+    avg_relevance_score: float = 0.0
 
 
 class RichQueryResponse(BaseModel):

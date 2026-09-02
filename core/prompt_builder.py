@@ -21,6 +21,7 @@ def build_prompt(
     claims: List[Claim],
     ranked: List[RankedEvidence],
     decision: DecisionResult,
+    intent=None,
 ) -> str:
     claims_block    = _format_claims(claims)
     evidence_summary = _format_evidence_summary(ranked, decision)
@@ -29,10 +30,55 @@ def build_prompt(
     neutral_count = sum(1 for item in ranked if item.claim.stance.value == "neutral")
     conflict_note = "Yes" if oppose_count > 0 and support_count > 0 else "No"
 
+    direct_evidence = [
+        item for item in ranked
+        if getattr(item.claim, 'relevance_label', None) and item.claim.relevance_label.value == "directly_relevant"
+    ]
+    indirect_evidence = [
+        item for item in ranked
+        if getattr(item.claim, 'relevance_label', None) and item.claim.relevance_label.value == "indirectly_relevant"
+    ]
+
+    intervention_str = ""
+    outcome_str = ""
+    if intent:
+        intervention_str = getattr(intent, 'intervention', '') or ""
+        outcome_str = getattr(intent, 'outcome', '') or ""
+
+    context_section = ""
+    if intervention_str or outcome_str:
+        context_section = f"""
+QUERY DECOMPOSITION:
+- Intervention/Exposure: {intervention_str or "not specified"}
+- Outcome/Measurement: {outcome_str or "not specified"}
+- Question type: {getattr(intent, 'question_type', 'general') if intent else 'general'}
+"""
+
+    direct_count = len(direct_evidence)
+    indirect_count = len(indirect_evidence)
+
+    direct_claims_block = ""
+    if direct_evidence:
+        direct_claims_block = "\n".join(
+            f"  {i}. [{item.claim.stance.value.upper()}] {item.claim.claim_text} (PMID: {item.claim.paper_pmid}) [DIRECTLY RELEVANT]"
+            for i, item in enumerate(direct_evidence[:5], 1)
+        )
+    else:
+        direct_claims_block = "  (no directly relevant claims found)"
+
+    indirect_claims_block = ""
+    if indirect_evidence:
+        indirect_claims_block = "\n".join(
+            f"  {i}. [{item.claim.stance.value.upper()}] {item.claim.claim_text} (PMID: {item.claim.paper_pmid}) [INDIRECTLY RELEVANT]"
+            for i, item in enumerate(indirect_evidence[:3], 1)
+        )
+    else:
+        indirect_claims_block = "  (no indirectly relevant claims found)"
+
     prompt = f"""You are a senior biomedical research analyst. Your task is to synthesize scientific evidence and answer the user query.
 
 QUERY: {query}
-
+{context_section}
 EVIDENCE CONTEXT:
 - Verdict: {decision.verdict.value}
 - Overall confidence: {decision.confidence.value}
@@ -41,8 +87,16 @@ EVIDENCE CONTEXT:
 - Opposing papers: {oppose_count}
 - Neutral or indirect papers: {neutral_count}
 - Conflict detected: {conflict_note}
+- Directly relevant evidence: {direct_count} papers
+- Indirectly relevant evidence: {indirect_count} papers
 
-CLAIMS EXTRACTED FROM PAPERS:
+DIRECTLY RELEVANT CLAIMS (papers that directly address the query):
+{direct_claims_block}
+
+INDIRECTLY RELEVANT CLAIMS (papers that provide context but do not directly address the query):
+{indirect_claims_block}
+
+ALL CLAIMS EXTRACTED FROM PAPERS:
 {claims_block}
 
 QUANTITATIVE EVIDENCE SUMMARY:
@@ -53,6 +107,16 @@ Analyze the evidence above and respond ONLY with this exact JSON structure.
 Do NOT include markdown, code fences, or any text outside the JSON.
 Do not understate clearly supportive evidence when direct support is strong and opposing evidence is absent.
 Do not overstate certainty when most papers are neutral or indirect.
+
+CRITICAL INSTRUCTIONS:
+- Answer the EXACT question asked. Do not shift to a related but different topic.
+- If the user asked about a specific intervention and outcome, your answer MUST address BOTH.
+- Prioritize DIRECTLY RELEVANT evidence over indirect evidence.
+- If there is insufficient directly relevant evidence, say so explicitly.
+- Do not use indirect evidence to make strong claims about the specific question asked.
+- Each claim in key_claims must be supported by at least one paper citation (PMID).
+
+{f"If the user asked about {{intervention_str}} and {{outcome_str}}, your answer MUST specifically address whether {{intervention_str}} affects {{outcome_str}}." if intervention_str and outcome_str else ""}
 
 {{
   "final_answer": "A direct 1-2 sentence answer to the user query based strictly on the evidence provided.",

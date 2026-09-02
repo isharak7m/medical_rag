@@ -11,7 +11,7 @@ from core.decision_engine import run as run_decision
 from core.evaluation import evaluate_and_log, score_retrieval
 from core.prompt_builder import build_prompt
 from core.response_formatter import format_response
-from db.schemas import Confidence, PipelineDiagnostics, QueryResponse, RichQueryResponse, SourceItem
+from db.schemas import Confidence, PipelineDiagnostics, QueryResponse, RichQueryResponse, SourceItem, RelevanceLabel
 from modules.claim_extractor import extract_claims
 from modules.contradiction_detector import detect_contradictions
 from modules.evidence_ranker import rank_evidence
@@ -75,11 +75,30 @@ def _get_active_llm_name(llm: BaseLLM) -> str:
     return type(llm).__name__.replace("LLM", "").replace("API", " API")
 
 
-def _domain_filter(papers, core_keywords: List[str]):
+def _domain_filter(papers, core_keywords: List[str], intent=None):
     if not core_keywords:
         return papers
 
+    intervention_terms = getattr(intent, 'intervention_terms', []) if intent else []
+    outcome_terms = getattr(intent, 'outcome_terms', []) if intent else []
     keywords = [keyword.lower() for keyword in core_keywords]
+
+    if intervention_terms and outcome_terms:
+        intervention_kws = [t.lower() for t in intervention_terms]
+        outcome_kws = [t.lower() for t in outcome_terms]
+        strict_filtered = [
+            paper
+            for paper in papers
+            if any(kw in paper.title.lower() or kw in paper.abstract.lower() for kw in intervention_kws)
+            and any(kw in paper.title.lower() or kw in paper.abstract.lower() for kw in outcome_kws)
+        ]
+        if len(strict_filtered) >= 2:
+            removed = len(papers) - len(strict_filtered)
+            if removed:
+                logger.info(f"Strict domain filter: removed {removed} papers (need intervention AND outcome), kept {len(strict_filtered)}")
+            return strict_filtered
+        logger.info(f"Strict filter only kept {len(strict_filtered)} papers; relaxing to keyword-only filter")
+
     filtered = [
         paper
         for paper in papers
@@ -135,7 +154,7 @@ class Pipeline:
                 cached.diagnostics.cache_hit = True
             return cached
 
-        pubmed_query, interpreted_query, core_keywords = normalize_query(
+        pubmed_query, interpreted_query, core_keywords, intent = normalize_query(
             raw_query,
             embedding_service=self._embedder,
             llm=self._llm,
@@ -166,7 +185,7 @@ class Pipeline:
         diagnostics.total_unique_papers = len(papers)
         logger.info(f"Total unique papers after merge: {len(papers)}")
 
-        papers = _domain_filter(papers, core_keywords)
+        papers = _domain_filter(papers, core_keywords, intent=intent)
         diagnostics.papers_after_filter = len(papers)
 
         if len(papers) < _MIN_PAPERS_FOR_ANSWER:

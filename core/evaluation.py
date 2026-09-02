@@ -2,9 +2,10 @@
 Evaluation module — lightweight, self-contained scoring.
 
 Metrics (no external datasets required):
-  - retrieval_score  : keyword overlap between query and retrieved docs (avg)
+  - retrieval_score  : intervention + outcome matching (avg)
   - faithfulness     : fraction of answer tokens grounded in retrieved docs
   - coverage         : fraction of query concepts present in the final answer
+  - relevance_score  : fraction of papers that match both intervention and outcome
 
 Logging:
   - Appends one JSON record per query to eval_log.jsonl
@@ -15,9 +16,10 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from db.schemas import EvalLog, Paper, RichQueryResponse
+from services.query_intent import QueryIntent, build_query_intent
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +39,7 @@ def _tokenize(text: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# Retrieval relevance score
+# Retrieval relevance score (intervention + outcome matching)
 # ---------------------------------------------------------------------------
 
 def score_retrieval(query: str, papers: List[Paper], core_keywords: List[str] = None) -> float:
@@ -49,7 +51,6 @@ def score_retrieval(query: str, papers: List[Paper], core_keywords: List[str] = 
     if not papers:
         return 0.0
 
-    # Use core keywords if provided, else tokenize raw query
     if core_keywords:
         query_tokens = set(k.lower() for k in core_keywords if len(k) > 2)
     else:
@@ -58,7 +59,6 @@ def score_retrieval(query: str, papers: List[Paper], core_keywords: List[str] = 
     if not query_tokens:
         return 0.0
 
-    # Score = fraction of papers that contain at least one core keyword
     hits = 0
     for paper in papers:
         doc_text = f"{paper.title} {paper.abstract}".lower()
@@ -66,6 +66,52 @@ def score_retrieval(query: str, papers: List[Paper], core_keywords: List[str] = 
             hits += 1
 
     return round(hits / len(papers), 4)
+
+
+def score_relevance_with_intent(
+    papers: List[Paper],
+    intent: QueryIntent | None = None,
+) -> float:
+    """
+    Score papers based on intervention + outcome matching.
+    Returns float in [0, 1].
+    """
+    if not papers or not intent:
+        return 0.0
+
+    intervention_terms = [t.lower() for t in intent.intervention_terms] if intent.intervention_terms else []
+    outcome_terms = [t.lower() for t in intent.outcome_terms] if intent.outcome_terms else []
+
+    if not intervention_terms and not outcome_terms:
+        return 0.0
+
+    directly_relevant = 0
+    for paper in papers:
+        doc_text = f"{paper.title} {paper.abstract}".lower()
+        has_intervention = any(t in doc_text for t in intervention_terms) if intervention_terms else True
+        has_outcome = any(t in doc_text for t in outcome_terms) if outcome_terms else True
+        if has_intervention and has_outcome:
+            directly_relevant += 1
+
+    return round(directly_relevant / len(papers), 4)
+
+
+def score_directness(papers: List[Paper], claims=None) -> float:
+    """
+    Score fraction of papers that are directly relevant (not just contextual).
+    Returns float in [0, 1].
+    """
+    if not papers:
+        return 0.0
+
+    if claims:
+        directly_relevant = sum(
+            1 for c in claims
+            if getattr(c, 'relevance_label', None) and c.relevance_label.value == "directly_relevant"
+        )
+        return round(directly_relevant / len(claims), 4)
+
+    return 0.5
 
 
 # ---------------------------------------------------------------------------
