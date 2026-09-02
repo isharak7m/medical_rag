@@ -75,6 +75,28 @@ def _get_active_llm_name(llm: BaseLLM) -> str:
     return type(llm).__name__.replace("LLM", "").replace("API", " API")
 
 
+def _stem_variants(keyword: str) -> list[str]:
+    """Generate simple stem variants for matching."""
+    variants = [keyword]
+    if keyword.endswith("s") and len(keyword) > 4:
+        variants.append(keyword[:-1])
+    if keyword.endswith("ing") and len(keyword) > 5:
+        variants.append(keyword[:-3])
+    if keyword.endswith("ed") and len(keyword) > 4:
+        variants.append(keyword[:-2])
+    if keyword.endswith("tion") and len(keyword) > 6:
+        variants.append(keyword[:-4])
+    return variants
+
+
+def _keyword_in_text(keyword: str, text: str) -> bool:
+    """Check if a keyword (with simple stemming) appears in text."""
+    for variant in _stem_variants(keyword):
+        if variant in text:
+            return True
+    return False
+
+
 def _domain_filter(papers, core_keywords: List[str], intent=None):
     if not core_keywords:
         return papers
@@ -89,8 +111,8 @@ def _domain_filter(papers, core_keywords: List[str], intent=None):
         strict_filtered = [
             paper
             for paper in papers
-            if any(kw in paper.title.lower() or kw in paper.abstract.lower() for kw in intervention_kws)
-            and any(kw in paper.title.lower() or kw in paper.abstract.lower() for kw in outcome_kws)
+            if any(_keyword_in_text(kw, paper.title.lower()) or _keyword_in_text(kw, paper.abstract.lower()) for kw in intervention_kws)
+            and any(_keyword_in_text(kw, paper.title.lower()) or _keyword_in_text(kw, paper.abstract.lower()) for kw in outcome_kws)
         ]
         if len(strict_filtered) >= 2:
             removed = len(papers) - len(strict_filtered)
@@ -102,7 +124,7 @@ def _domain_filter(papers, core_keywords: List[str], intent=None):
     filtered = [
         paper
         for paper in papers
-        if any(keyword in paper.title.lower() or keyword in paper.abstract.lower() for keyword in keywords)
+        if any(_keyword_in_text(keyword, paper.title.lower()) or _keyword_in_text(keyword, paper.abstract.lower()) for keyword in keywords)
     ]
 
     if not filtered:
