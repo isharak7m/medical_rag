@@ -258,7 +258,10 @@ async def register(
 ) -> AuthResponse:
     from services.auth import AuthStore
     store = request.app.state.auth_store
-    user = store.register(body.username, body.email, body.password)
+    try:
+        user = store.register(body.username, body.email, body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not user:
         raise HTTPException(status_code=400, detail="Username or email already exists")
     token = AuthStore.create_token(user)
@@ -281,11 +284,19 @@ async def login(
 
 @router.get("/auth/me", response_model=UserResponse, summary="Get current user info")
 async def get_me(
-    user=None,
-    request: Request = None,
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
 ) -> UserResponse:
-    if user is None:
+    if credentials is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    from services.auth import AuthStore
+    store = request.app.state.auth_store
+    payload = AuthStore.decode_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = store.get_user_by_id(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
     return UserResponse(**user.to_dict())
 
 

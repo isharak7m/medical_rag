@@ -19,6 +19,21 @@ render_hero(
 # ── Session state init ──────────────────────────────────────
 if "auth_mode" not in st.session_state:
     st.session_state["auth_mode"] = "login"
+if "auth_msg" not in st.session_state:
+    st.session_state["auth_msg"] = None
+if "auth_msg_type" not in st.session_state:
+    st.session_state["auth_msg_type"] = None
+
+# Show any pending message
+if st.session_state.get("auth_msg"):
+    if st.session_state["auth_msg_type"] == "success":
+        st.success(st.session_state["auth_msg"])
+    elif st.session_state["auth_msg_type"] == "error":
+        st.error(st.session_state["auth_msg"])
+    elif st.session_state["auth_msg_type"] == "warning":
+        st.warning(st.session_state["auth_msg"])
+    st.session_state["auth_msg"] = None
+    st.session_state["auth_msg_type"] = None
 
 # ── Toggle login/register ──────────────────────────────────
 col1, col2, col3 = st.columns([1, 2, 1])
@@ -52,11 +67,14 @@ if st.session_state["auth_mode"] == "login":
                 st.session_state["auth_token"] = data["token"]
                 st.session_state["auth_user_id"] = data["user_id"]
                 st.session_state["auth_username"] = data["username"]
+                st.session_state["auth_msg"] = f"Welcome back, {data['username']}!"
+                st.session_state["auth_msg_type"] = "success"
                 st.rerun()
             elif resp.status_code == 401:
                 st.error("Invalid username or password.")
             else:
-                st.error(f"Error: {resp.text[:200]}")
+                detail = resp.json().get("detail", resp.text[:200]) if resp.text else "Unknown error"
+                st.error(f"Error: {detail}")
         except requests.ConnectionError:
             st.error("Cannot connect to API server. Make sure it's running on port 8000.")
         except Exception as e:
@@ -92,11 +110,15 @@ else:
                     st.session_state["auth_token"] = data["token"]
                     st.session_state["auth_user_id"] = data["user_id"]
                     st.session_state["auth_username"] = data["username"]
+                    st.session_state["auth_msg"] = f"Account created! Welcome, {data['username']}!"
+                    st.session_state["auth_msg_type"] = "success"
                     st.rerun()
                 elif resp.status_code == 400:
-                    st.error("Username or email already exists.")
+                    detail = resp.json().get("detail", "Registration failed") if resp.text else "Registration failed"
+                    st.error(detail)
                 else:
-                    st.error(f"Error: {resp.text[:200]}")
+                    detail = resp.json().get("detail", resp.text[:200]) if resp.text else "Unknown error"
+                    st.error(f"Error: {detail}")
             except requests.ConnectionError:
                 st.error("Cannot connect to API server. Make sure it's running on port 8000.")
             except Exception as e:

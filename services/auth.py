@@ -79,7 +79,6 @@ class AuthStore:
             )
             conn.commit()
         except sqlite3.IntegrityError:
-            conn.close()
             return None
         finally:
             conn.close()
