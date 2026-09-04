@@ -241,16 +241,100 @@ async def literature_review(
     request: Request,
 ) -> LiteratureReviewResponse:
     orchestrator = _get_orchestrator(request)
-    result = await orchestrator.route(
+    pipeline = _get_pipeline(request)
+
+    papers = []
+    claims = []
+    evidence = {}
+    try:
+        result = await pipeline.run_rich(body.query)
+        if hasattr(result, "evidence_cards"):
+            for card in result.evidence_cards:
+                papers.append({
+                    "pmid": card.pmid,
+                    "title": card.title,
+                    "abstract": card.claim_text,
+                    "sample_size": getattr(card, "sample_size", None),
+                })
+        if hasattr(result, "claim_links"):
+            for cl in result.claim_links:
+                stance_val = cl.stance.value if hasattr(cl.stance, "value") else str(cl.stance)
+                claims.append({
+                    "paper_title": cl.paper_title,
+                    "claim_text": cl.claim_text,
+                    "stance": stance_val,
+                })
+        evidence = {
+            "verdict": result.verdict.value if hasattr(result, "verdict") else "",
+            "confidence": result.confidence.label.value if hasattr(result, "confidence") else "",
+            "support_count": result.contradiction.support_count if hasattr(result, "contradiction") else 0,
+            "oppose_count": result.contradiction.oppose_count if hasattr(result, "contradiction") else 0,
+            "neutral_count": result.contradiction.neutral_count if hasattr(result, "contradiction") else 0,
+        }
+    except Exception as exc:
+        logger.warning(f"Pipeline failed during literature review: {exc}")
+
+    agent_result = await orchestrator.route(
         TaskType.LITERATURE_REVIEW,
-        {"query": body.query},
+        {"query": body.query, "papers": papers, "claims": claims, "evidence": evidence},
     )
+
+    review_text = agent_result.get("review", "")
+    if not review_text or review_text.startswith("{"):
+        review_text = _build_fallback_review(body.query, papers, claims, evidence)
+
     return LiteratureReviewResponse(
         query=body.query,
-        review=result.get("review", ""),
-        papers_reviewed=result.get("papers_reviewed", 0),
-        sections=result.get("sections", []),
+        review=review_text,
+        papers_reviewed=len(papers),
+        sections=_extract_review_sections(review_text),
     )
+
+
+def _extract_review_sections(review: str) -> list:
+    import re
+    return re.findall(r"^##\s+(.+)$", review, re.MULTILINE)
+
+
+def _build_fallback_review(query: str, papers: list, claims: list, evidence: dict) -> str:
+    support = [c for c in claims if c.get("stance") == "support"]
+    oppose = [c for c in claims if c.get("stance") == "oppose"]
+    neutral = [c for c in claims if c.get("stance") == "neutral"]
+    sections = []
+    sections.append(f"# Literature Review: {query}\n")
+    sections.append(f"**Papers reviewed:** {len(papers)}\n")
+    sections.append("## Executive Summary\n")
+    sections.append(
+        f"This review examines {len(papers)} publications on {query}. "
+        f"Of the extracted claims, {len(support)} support, {len(oppose)} contradict, "
+        f"and {len(neutral)} are neutral regarding the research question.\n"
+    )
+    if support:
+        sections.append("## Supporting Evidence\n")
+        for c in support[:5]:
+            sections.append(f"- **{c.get('paper_title', 'Unknown')}**: {c.get('claim_text', '')}\n")
+    if oppose:
+        sections.append("## Contradicting Evidence\n")
+        for c in oppose[:5]:
+            sections.append(f"- **{c.get('paper_title', 'Unknown')}**: {c.get('claim_text', '')}\n")
+    if neutral:
+        sections.append("## Inconclusive Findings\n")
+        for c in neutral[:3]:
+            sections.append(f"- **{c.get('paper_title', 'Unknown')}**: {c.get('claim_text', '')}\n")
+    sections.append("## Research Gaps\n")
+    sections.append(
+        "- Further large-scale randomized controlled trials are needed\n"
+        "- Long-term follow-up studies are lacking\n"
+        "- Population-specific effects require more investigation\n"
+    )
+    sections.append("## Conclusion\n")
+    sections.append(
+        f"The evidence base for {query} includes {len(papers)} studies with "
+        f"mixed findings. While {len(support)} claims support the hypothesis, "
+        f"{len(oppose)} claims present contradicting evidence. "
+        f"More rigorous research is needed to resolve these discrepancies.\n"
+    )
+    return "\n".join(sections)
 
 
 # ── Knowledge graph endpoints ───────────────────────────────

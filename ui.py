@@ -69,6 +69,14 @@ def inject_theme() -> None:
             border-right: 1px solid var(--line);
         }
 
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] > ul {
+            display: none;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stSidebarNav"] {
+            display: none;
+        }
+
         h1, h2, h3 {
             letter-spacing: -0.03em;
         }
