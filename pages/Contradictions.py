@@ -3,10 +3,11 @@ from __future__ import annotations
 import plotly.express as px
 import streamlit as st
 
-from ui import get_response, init_page, render_hero, render_metric_card
+from ui import get_response, init_page, render_hero, render_metric_card, require_login
 
 
 init_page("MyoCortex | Contradictions", "MX")
+require_login()
 
 render_hero(
     "Surface conflict instead of hiding it.",

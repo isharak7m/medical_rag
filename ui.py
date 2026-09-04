@@ -24,6 +24,26 @@ STANCE_CLASS = {
 }
 
 
+def get_auth_headers() -> dict[str, str]:
+    """Return Authorization header if user is logged in."""
+    token = st.session_state.get("auth_token")
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def is_logged_in() -> bool:
+    """Check if user is authenticated."""
+    return bool(st.session_state.get("auth_token"))
+
+
+def require_login():
+    """Redirect to login page if not authenticated."""
+    if not is_logged_in():
+        st.switch_page("pages/Login.py")
+        st.stop()
+
+
 def inject_theme() -> None:
     st.markdown(
         """
@@ -314,6 +334,9 @@ def init_state() -> None:
     st.session_state.setdefault("last_query", "")
     st.session_state.setdefault("rich_response", None)
     st.session_state.setdefault("paper_detail", None)
+    st.session_state.setdefault("auth_token", "")
+    st.session_state.setdefault("auth_user_id", "")
+    st.session_state.setdefault("auth_username", "")
 
 
 def render_sidebar() -> None:
@@ -336,6 +359,22 @@ def render_sidebar() -> None:
         st.page_link("pages/KnowledgeGraph.py", label="Knowledge Graph")
         st.page_link("pages/LiteratureReview.py", label="Literature Review")
         st.page_link("pages/Workspace.py", label="Workspace")
+
+        st.markdown("---")
+        username = st.session_state.get("auth_username", "")
+        if username:
+            st.markdown(
+                f'<div class="small muted">Signed in as <strong>{username}</strong></div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("Sign Out", use_container_width=True):
+                st.session_state["auth_token"] = ""
+                st.session_state["auth_user_id"] = ""
+                st.session_state["auth_username"] = ""
+                st.switch_page("pages/Login.py")
+        else:
+            st.page_link("pages/Login.py", label="Sign In")
+
         st.caption(f"API base: {API_BASE}")
 
 
@@ -354,7 +393,7 @@ def render_hero(title: str, subtitle: str, eyebrow: str = "Biomedical Research W
 
 def call_health(timeout: int = 6) -> dict[str, Any]:
     try:
-        response = requests.get(f"{API_BASE}/health", timeout=timeout)
+        response = requests.get(f"{API_BASE}/health", headers=get_auth_headers(), timeout=timeout)
         response.raise_for_status()
         return {"ok": True, "data": response.json()}
     except requests.RequestException as exc:
@@ -366,6 +405,7 @@ def call_query(query: str, timeout: int = 120) -> dict[str, Any]:
         response = requests.post(
             f"{API_BASE}/query/rich",
             json={"query": query},
+            headers=get_auth_headers(),
             timeout=timeout,
         )
         response.raise_for_status()
@@ -379,7 +419,7 @@ def call_query(query: str, timeout: int = 120) -> dict[str, Any]:
 
 def fetch_paper(pmid: str, timeout: int = 20) -> dict[str, Any]:
     try:
-        response = requests.get(f"{API_BASE}/paper/{pmid}", timeout=timeout)
+        response = requests.get(f"{API_BASE}/paper/{pmid}", headers=get_auth_headers(), timeout=timeout)
         response.raise_for_status()
         data = response.json()
         st.session_state["paper_detail"] = data

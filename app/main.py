@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from api.routes import router
@@ -21,6 +22,7 @@ from services.biorxiv_service import BioRxivService
 from services.knowledge_graph import KnowledgeGraphService
 from services.version_control import VersionControlStore
 from services.collaboration import CollaborationStore
+from services.auth import AuthStore
 from agents.orchestrator import Orchestrator
 from agents.retrieval_agent import RetrievalAgent
 from agents.evidence_agent import EvidenceAgent
@@ -53,6 +55,7 @@ async def lifespan(app: FastAPI):
     # Version control and collaboration stores
     version_store = VersionControlStore(db_path=settings.ARTIFACTS_DB_PATH)
     collab_store = CollaborationStore(db_path=settings.COLLAB_DB_PATH)
+    auth_store = AuthStore(db_path=settings.USERS_DB_PATH)
 
     # Knowledge graph service
     kg_service = KnowledgeGraphService(llm_generate=llm.generate)
@@ -85,6 +88,7 @@ async def lifespan(app: FastAPI):
     app.state.kg_service = kg_service
     app.state.version_store = version_store
     app.state.collab_store = collab_store
+    app.state.auth_store = auth_store
     app.state.biorxiv_service = biorxiv_service
 
     logger.info("All services initialised. MyoCortex is ready.")
@@ -110,6 +114,13 @@ def create_app() -> FastAPI:
             "Powered by PubMed + bioRxiv + FAISS + LLM."
         ),
         lifespan=lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.include_router(router, prefix="/api/v1")
     return app

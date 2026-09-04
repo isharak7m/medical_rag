@@ -24,7 +24,7 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_LOG_PATH = Path("eval_log.jsonl")
+_LOG_PATH = Path(__file__).parent.parent / "eval_log.jsonl"
 
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "in", "to", "for", "is", "are",

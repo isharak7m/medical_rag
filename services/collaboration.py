@@ -60,43 +60,45 @@ class CollaborationStore:
 
     def _init_db(self) -> None:
         conn = sqlite3.connect(self._db_path)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS workspaces (
-                workspace_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                created_by TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                shared_artifacts TEXT DEFAULT '[]'
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS workspace_members (
-                member_id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                username TEXT NOT NULL,
-                role TEXT DEFAULT 'viewer',
-                joined_at TEXT NOT NULL,
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS collab_comments (
-                comment_id TEXT PRIMARY KEY,
-                workspace_id TEXT NOT NULL,
-                artifact_id TEXT,
-                parent_comment_id TEXT,
-                author TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                resolved INTEGER DEFAULT 0,
-                mentions TEXT DEFAULT '[]',
-                FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
-            )
-        """)
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspaces (
+                    workspace_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    created_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    shared_artifacts TEXT DEFAULT '[]'
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_members (
+                    member_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    role TEXT DEFAULT 'viewer',
+                    joined_at TEXT NOT NULL,
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS collab_comments (
+                    comment_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    artifact_id TEXT,
+                    parent_comment_id TEXT,
+                    author TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved INTEGER DEFAULT 0,
+                    mentions TEXT DEFAULT '[]',
+                    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)
+                )
+            """)
+            conn.commit()
+        finally:
+            conn.close()
 
     def create_workspace(
         self, name: str, description: str, created_by: str
@@ -118,27 +120,29 @@ class CollaborationStore:
         ws.members = [member]
 
         conn = sqlite3.connect(self._db_path)
-        conn.execute(
-            "INSERT INTO workspaces VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (ws_id, name, description, created_by, now, now, "[]"),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO workspaces VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (ws_id, name, description, created_by, now, now, "[]"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         logger.info(f"Created workspace '{name}' ({ws_id}) by {created_by}")
         return ws
 
     def get_workspace(self, workspace_id: str) -> Optional[Workspace]:
         conn = sqlite3.connect(self._db_path)
-        row = conn.execute(
-            "SELECT * FROM workspaces WHERE workspace_id=?", (workspace_id,)
-        ).fetchone()
-        if not row:
+        try:
+            row = conn.execute(
+                "SELECT * FROM workspaces WHERE workspace_id=?", (workspace_id,)
+            ).fetchone()
+            if not row:
+                return None
+            members = self._get_members(workspace_id, conn)
+        finally:
             conn.close()
-            return None
-
-        members = self._get_members(workspace_id, conn)
-        conn.close()
 
         return Workspace(
             workspace_id=row[0],
@@ -153,35 +157,37 @@ class CollaborationStore:
 
     def list_workspaces(self, username: Optional[str] = None) -> List[Workspace]:
         conn = sqlite3.connect(self._db_path)
-        if username:
-            rows = conn.execute(
-                """SELECT w.* FROM workspaces w
-                   JOIN workspace_members m ON w.workspace_id = m.workspace_id
-                   WHERE m.username = ?
-                   ORDER BY w.updated_at DESC""",
-                (username,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM workspaces ORDER BY updated_at DESC"
-            ).fetchall()
+        try:
+            if username:
+                rows = conn.execute(
+                    """SELECT w.* FROM workspaces w
+                       JOIN workspace_members m ON w.workspace_id = m.workspace_id
+                       WHERE m.username = ?
+                       ORDER BY w.updated_at DESC""",
+                    (username,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM workspaces ORDER BY updated_at DESC"
+                ).fetchall()
 
-        results = []
-        for r in rows:
-            members = self._get_members(r[0], conn)
-            results.append(
-                Workspace(
-                    workspace_id=r[0],
-                    name=r[1],
-                    description=r[2],
-                    created_by=r[3],
-                    created_at=r[4],
-                    updated_at=r[5],
-                    shared_artifacts=json.loads(r[6]) if r[6] else [],
-                    members=members,
+            results = []
+            for r in rows:
+                members = self._get_members(r[0], conn)
+                results.append(
+                    Workspace(
+                        workspace_id=r[0],
+                        name=r[1],
+                        description=r[2],
+                        created_by=r[3],
+                        created_at=r[4],
+                        updated_at=r[5],
+                        shared_artifacts=json.loads(r[6]) if r[6] else [],
+                        members=members,
+                    )
                 )
-            )
-        conn.close()
+        finally:
+            conn.close()
         return results
 
     def add_member(
@@ -199,34 +205,37 @@ class CollaborationStore:
         )
 
         conn = sqlite3.connect(self._db_path)
-        conn.execute(
-            "INSERT OR IGNORE INTO workspace_members VALUES (?, ?, ?, ?, ?)",
-            (member_id, workspace_id, username, role, now),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO workspace_members VALUES (?, ?, ?, ?, ?)",
+                (member_id, workspace_id, username, role, now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
         return member
 
     def share_artifact(self, workspace_id: str, artifact_id: str) -> bool:
         conn = sqlite3.connect(self._db_path)
-        row = conn.execute(
-            "SELECT shared_artifacts FROM workspaces WHERE workspace_id=?",
-            (workspace_id,),
-        ).fetchone()
-        if not row:
-            conn.close()
-            return False
+        try:
+            row = conn.execute(
+                "SELECT shared_artifacts FROM workspaces WHERE workspace_id=?",
+                (workspace_id,),
+            ).fetchone()
+            if not row:
+                return False
 
-        artifacts = json.loads(row[0]) if row[0] else []
-        if artifact_id not in artifacts:
-            artifacts.append(artifact_id)
-            now = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                "UPDATE workspaces SET shared_artifacts=?, updated_at=? WHERE workspace_id=?",
-                (json.dumps(artifacts), now, workspace_id),
-            )
-            conn.commit()
-        conn.close()
+            artifacts = json.loads(row[0]) if row[0] else []
+            if artifact_id not in artifacts:
+                artifacts.append(artifact_id)
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "UPDATE workspaces SET shared_artifacts=?, updated_at=? WHERE workspace_id=?",
+                    (json.dumps(artifacts), now, workspace_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
         return True
 
     def add_comment(
@@ -256,12 +265,14 @@ class CollaborationStore:
         )
 
         conn = sqlite3.connect(self._db_path)
-        conn.execute(
-            "INSERT INTO collab_comments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (comment_id, workspace_id, artifact_id, parent_comment_id, author, content, now, 0, json.dumps(mentions)),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO collab_comments VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (comment_id, workspace_id, artifact_id, parent_comment_id, author, content, now, 0, json.dumps(mentions)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         logger.info(f"Comment {comment_id} in workspace {workspace_id} by {author}")
         return comment
@@ -272,17 +283,19 @@ class CollaborationStore:
         artifact_id: Optional[str] = None,
     ) -> List[CollabComment]:
         conn = sqlite3.connect(self._db_path)
-        if artifact_id:
-            rows = conn.execute(
-                "SELECT * FROM collab_comments WHERE workspace_id=? AND artifact_id=? ORDER BY created_at ASC",
-                (workspace_id, artifact_id),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM collab_comments WHERE workspace_id=? ORDER BY created_at ASC",
-                (workspace_id,),
-            ).fetchall()
-        conn.close()
+        try:
+            if artifact_id:
+                rows = conn.execute(
+                    "SELECT * FROM collab_comments WHERE workspace_id=? AND artifact_id=? ORDER BY created_at ASC",
+                    (workspace_id, artifact_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM collab_comments WHERE workspace_id=? ORDER BY created_at ASC",
+                    (workspace_id,),
+                ).fetchall()
+        finally:
+            conn.close()
         return [
             CollabComment(
                 comment_id=r[0],
@@ -300,13 +313,15 @@ class CollaborationStore:
 
     def resolve_comment(self, comment_id: str) -> bool:
         conn = sqlite3.connect(self._db_path)
-        conn.execute(
-            "UPDATE collab_comments SET resolved=1 WHERE comment_id=?",
-            (comment_id,),
-        )
-        conn.commit()
-        changed = conn.total_changes
-        conn.close()
+        try:
+            conn.execute(
+                "UPDATE collab_comments SET resolved=1 WHERE comment_id=?",
+                (comment_id,),
+            )
+            conn.commit()
+            changed = conn.total_changes
+        finally:
+            conn.close()
         return changed > 0
 
     def _get_members(self, workspace_id: str, conn: sqlite3.Connection) -> List[WorkspaceMember]:

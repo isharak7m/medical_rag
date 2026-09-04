@@ -4,9 +4,10 @@ import streamlit as st
 import requests
 import json
 
-from ui import init_page, render_hero, render_metric_card, API_BASE
+from ui import init_page, render_hero, render_metric_card, API_BASE, get_auth_headers, require_login
 
 init_page("MyoCortex | Knowledge Graph", "KG")
+require_login()
 
 render_hero(
     "Biomedical Knowledge Graph",
@@ -26,7 +27,7 @@ with st.form("kg-form"):
 if submitted and query:
     with st.spinner("Building knowledge graph..."):
         try:
-            resp = requests.post(f"{API_BASE}/kg/build", json={"query": query}, timeout=60)
+            resp = requests.post(f"{API_BASE}/kg/build", json={"query": query}, headers=get_auth_headers(), timeout=60)
             if resp.status_code == 200:
                 data = resp.json()
                 st.session_state["kg_data"] = data
@@ -75,9 +76,9 @@ if kg_data:
     edges = kg_data.get("edges", [])
     if nodes:
         st.markdown('<div class="section-title">Graph Visualization</div>', unsafe_allow_html=True)
-        graph_json = json.dumps({"nodes": nodes, "edges": edges})
-        st.code(graph_json[:3000], language="json")
-        st.caption(f"Showing {len(nodes)} nodes and {len(edges)} edges. Full graph data available via API: GET /api/v1/kg/graph/{query}")
+        graph_json = json.dumps({"nodes": nodes, "edges": edges}, indent=2)
+        st.code(graph_json, language="json")
+        st.caption(f"{len(nodes)} nodes and {len(edges)} edges. Full data via API: GET /api/v1/kg/graph/{query}")
 
     if edges:
         st.markdown('<div class="section-title">Relationships</div>', unsafe_allow_html=True)

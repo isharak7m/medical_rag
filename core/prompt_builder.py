@@ -116,7 +116,7 @@ CRITICAL INSTRUCTIONS:
 - Do not use indirect evidence to make strong claims about the specific question asked.
 - Each claim in key_claims must be supported by at least one paper citation (PMID).
 
-{f"If the user asked about {{intervention_str}} and {{outcome_str}}, your answer MUST specifically address whether {{intervention_str}} affects {{outcome_str}}." if intervention_str and outcome_str else ""}
+{f"If the user asked about {intervention_str} and {outcome_str}, your answer MUST specifically address whether {intervention_str} affects {outcome_str}." if intervention_str and outcome_str else ""}
 
 {{
   "final_answer": "A direct 1-2 sentence answer to the user query based strictly on the evidence provided.",

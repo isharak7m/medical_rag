@@ -4,7 +4,7 @@ import io
 import streamlit as st
 import requests
 
-from ui import init_page, render_hero, render_metric_card, API_BASE
+from ui import init_page, render_hero, render_metric_card, API_BASE, get_auth_headers, require_login
 
 
 def extract_text_from_file(uploaded_file) -> str:
@@ -31,6 +31,7 @@ def extract_text_from_file(uploaded_file) -> str:
 
 
 init_page("MyoCortex | Research Workspace", "WS")
+require_login()
 
 render_hero(
     "Research Workspace",
@@ -105,7 +106,7 @@ if ws_action == "My Artifacts":
                 "content": content,
                 "author": author,
                 "tags": tags,
-            }, timeout=10)
+            }, headers=get_auth_headers(), timeout=10)
             if resp.status_code == 200:
                 st.success(f"Created: {resp.json().get('artifact_id')}")
                 st.rerun()
@@ -120,7 +121,7 @@ if ws_action == "My Artifacts":
     filter_type = st.selectbox("Filter", ["all", "note", "hypothesis", "manuscript", "review"])
     try:
         params = {} if filter_type == "all" else {"artifact_type": filter_type}
-        resp = requests.get(f"{API_BASE}/artifacts", params=params, timeout=10)
+        resp = requests.get(f"{API_BASE}/artifacts", params=params, headers=get_auth_headers(), timeout=10)
         if resp.status_code == 200:
             artifacts = resp.json()
             if artifacts:
@@ -155,7 +156,7 @@ if ws_action == "My Artifacts":
                     # Version history
                     with st.expander(f"Version History ({art.get('artifact_id')})"):
                         try:
-                            hist_resp = requests.get(f"{API_BASE}/artifacts/{art['artifact_id']}/history", timeout=10)
+                            hist_resp = requests.get(f"{API_BASE}/artifacts/{art['artifact_id']}/history", headers=get_auth_headers(), timeout=10)
                             if hist_resp.status_code == 200:
                                 for v in hist_resp.json():
                                     diff = v.get("diff_from_previous", "")
@@ -198,6 +199,7 @@ if ws_action == "My Artifacts":
                                     up_resp = requests.put(
                                         f"{API_BASE}/artifacts/{art['artifact_id']}",
                                         json={"content": new_content, "message": update_msg},
+                                        headers=get_auth_headers(),
                                         timeout=10,
                                     )
                                     if up_resp.status_code == 200:
@@ -231,7 +233,7 @@ else:
                     "name": ws_name,
                     "description": ws_desc,
                     "created_by": ws_author,
-                }, timeout=10)
+                }, headers=get_auth_headers(), timeout=10)
                 if resp.status_code == 200:
                     st.success(f"Created: {resp.json().get('workspace_id')}")
                     st.rerun()
@@ -240,7 +242,7 @@ else:
 
     # ── List workspaces ──────────────────────────────────────
     try:
-        resp = requests.get(f"{API_BASE}/workspaces", timeout=10)
+        resp = requests.get(f"{API_BASE}/workspaces", headers=get_auth_headers(), timeout=10)
         if resp.status_code == 200:
             workspaces = resp.json()
             if workspaces:
@@ -293,12 +295,13 @@ else:
                                         "content": doc_content,
                                         "author": ws_author_field,
                                         "tags": [ws.get("name", "")],
-                                    }, timeout=10)
+                                    }, headers=get_auth_headers(), timeout=10)
                                     if art_resp.status_code == 200:
                                         artifact_id = art_resp.json().get("artifact_id")
                                         share_resp = requests.post(
                                             f"{API_BASE}/workspaces/{ws_id}/share",
                                             json={"artifact_id": artifact_id},
+                                            headers=get_auth_headers(),
                                             timeout=10,
                                         )
                                         st.success(f"Uploaded {ws_doc_title} to workspace!")
@@ -312,7 +315,7 @@ else:
                             st.markdown("**Shared Documents:**")
                             for art_id in shared_ids:
                                 try:
-                                    art_resp = requests.get(f"{API_BASE}/artifacts/{art_id}", timeout=10)
+                                    art_resp = requests.get(f"{API_BASE}/artifacts/{art_id}", headers=get_auth_headers(), timeout=10)
                                     if art_resp.status_code == 200:
                                         art = art_resp.json()
                                         c1, c2 = st.columns([4, 1])
@@ -326,7 +329,7 @@ else:
 
                         # Show artifacts tagged with this workspace
                         try:
-                            arts_resp = requests.get(f"{API_BASE}/artifacts", params={"tag": ws.get("name", "")}, timeout=10)
+                            arts_resp = requests.get(f"{API_BASE}/artifacts", params={"tag": ws.get("name", "")}, headers=get_auth_headers(), timeout=10)
                             if arts_resp.status_code == 200:
                                 tagged = arts_resp.json()
                                 if tagged:
@@ -363,6 +366,7 @@ else:
                                     member_resp = requests.post(
                                         f"{API_BASE}/workspaces/{ws_id}/members",
                                         json={"username": new_member, "role": new_role},
+                                        headers=get_auth_headers(),
                                         timeout=10,
                                     )
                                     if member_resp.status_code == 200:
@@ -376,7 +380,7 @@ else:
                     # ── Discussion tab ───────────────────────
                     with tab_comments:
                         try:
-                            c_resp = requests.get(f"{API_BASE}/workspaces/{ws_id}/comments", timeout=10)
+                            c_resp = requests.get(f"{API_BASE}/workspaces/{ws_id}/comments", headers=get_auth_headers(), timeout=10)
                             if c_resp.status_code == 200:
                                 comments = c_resp.json()
                                 if comments:
@@ -408,7 +412,7 @@ else:
                                     requests.post(f"{API_BASE}/workspaces/{ws_id}/comment", json={
                                         "author": comment_author,
                                         "content": comment_text,
-                                    }, timeout=10)
+                                    }, headers=get_auth_headers(), timeout=10)
                                     st.rerun()
                                 except Exception as e:
                                     st.error(str(e))

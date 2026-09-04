@@ -3,9 +3,10 @@ from __future__ import annotations
 import streamlit as st
 import requests
 
-from ui import init_page, render_hero, render_metric_card, API_BASE
+from ui import init_page, render_hero, render_metric_card, API_BASE, get_auth_headers, require_login
 
 init_page("MyoCortex | Literature Review", "LR")
+require_login()
 
 render_hero(
     "Literature Review Generator",
@@ -23,7 +24,7 @@ with st.form("review-form"):
 if submitted and query:
     with st.spinner("Generating literature review..."):
         try:
-            resp = requests.post(f"{API_BASE}/review", json={"query": query}, timeout=90)
+            resp = requests.post(f"{API_BASE}/review", json={"query": query}, headers=get_auth_headers(), timeout=90)
             if resp.status_code == 200:
                 data = resp.json()
                 st.session_state["review_data"] = data
@@ -63,40 +64,6 @@ if review_data:
         st.markdown('<div class="section-title">Sections</div>', unsafe_allow_html=True)
         for s in sections:
             st.markdown(f"- **{s}**")
-
-    # Also show the pipeline evidence
-    st.markdown('<div class="section-title">Supporting Evidence Pipeline</div>', unsafe_allow_html=True)
-    try:
-        pipe_resp = requests.post(f"{API_BASE}/query/rich", json={"query": query}, timeout=60)
-        if pipe_resp.status_code == 200:
-            pipe_data = pipe_resp.json()
-            evidence = pipe_data.get("evidence_cards", [])
-            contradiction = pipe_data.get("contradiction", {})
-
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                render_metric_card("Verdict", pipe_data.get("verdict", "N/A"), "Decision engine")
-            with c2:
-                render_metric_card("Supporting", contradiction.get("support_count", 0), "Claims aligned")
-            with c3:
-                render_metric_card("Opposing", contradiction.get("oppose_count", 0), "Claims against")
-            with c4:
-                render_metric_card("Neutral", contradiction.get("neutral_count", 0), "Inconclusive")
-
-            if evidence:
-                st.markdown("**Key Evidence:**")
-                for card in evidence[:5]:
-                    stance = card.get("stance", "neutral")
-                    color = "#62f2bc" if stance == "support" else "#ff8d8d" if stance == "oppose" else "#ffd66e"
-                    st.markdown(
-                        f'<div class="evidence-card">'
-                        f'<span style="color:{color};font-weight:700;">[{stance.upper()}]</span> '
-                        f'{card.get("title", "")} — {card.get("claim_text", "")[:150]}'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
-    except Exception:
-        pass
 
 else:
     st.markdown(

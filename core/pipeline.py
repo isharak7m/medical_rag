@@ -71,7 +71,8 @@ _LOW_QUALITY_RETRIEVAL = QueryResponse(
 
 def _get_active_llm_name(llm: BaseLLM) -> str:
     if isinstance(llm, FallbackLLM):
-        return "Groq (primary) -> HuggingFace (fallback)"
+        backends = [type(b).__name__.replace("LLM", "").replace("API", " API") for b in llm._backends]
+        return " -> ".join(backends)
     return type(llm).__name__.replace("LLM", "").replace("API", " API")
 
 

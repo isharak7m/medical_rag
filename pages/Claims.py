@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui import get_response, init_page, render_claim_links, render_hero, render_metric_card
+from ui import get_response, init_page, render_claim_links, render_hero, render_metric_card, require_login
 
 
 init_page("MyoCortex | Claims", "MC")
+require_login()
 
 render_hero(
     "Trace extracted claims back to their paper sources.",

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui import fetch_paper, get_paper_detail, get_response, init_page, render_evidence_cards, render_hero
+from ui import fetch_paper, get_paper_detail, get_response, init_page, render_evidence_cards, render_hero, require_login
 
 
 init_page("MyoCortex | Papers", "MP")
+require_login()
 
 render_hero(
     "Read source papers without leaving the app.",

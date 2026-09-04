@@ -207,6 +207,7 @@ class ArtifactRequest(BaseModel):
     author: str = "system"
     tags: List[str] = Field(default_factory=list)
     message: str = "Created"
+    owner_id: str = ""
 
 
 class ArtifactUpdateRequest(BaseModel):
@@ -226,6 +227,7 @@ class ArtifactResponse(BaseModel):
     updated_at: str
     author: str
     tags: List[str] = Field(default_factory=list)
+    owner_id: str = ""
 
 
 class VersionResponse(BaseModel):
@@ -270,6 +272,30 @@ class WorkspaceResponse(BaseModel):
     updated_at: str
     members: List[dict] = Field(default_factory=list)
     shared_artifacts: List[str] = Field(default_factory=list)
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=30)
+    email: str = Field(..., min_length=5)
+    password: str = Field(..., min_length=6)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user_id: str
+    username: str
+
+
+class UserResponse(BaseModel):
+    user_id: str
+    username: str
+    email: str
+    created_at: str
 
 
 class AgentQueryRequest(BaseModel):

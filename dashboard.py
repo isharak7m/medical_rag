@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui import call_health, call_query, get_response, init_page, render_confidence_bar, render_evidence_cards, render_hero, render_metric_card
+from ui import call_health, call_query, get_response, init_page, render_confidence_bar, render_evidence_cards, render_hero, render_metric_card, require_login
 
 
 init_page("MyoCortex | Home", "MC")
+require_login()
 
 render_hero(
     "Research synthesis with clearer evidence and a working interface.",

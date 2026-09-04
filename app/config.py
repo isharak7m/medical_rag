@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     # Collaboration
     COLLAB_DB_PATH: str = "collaboration.db"
 
+    # Auth
+    JWT_SECRET: str = "myocortex-secret-key-change-in-production"
+    JWT_EXPIRY_HOURS: int = 24
+    USERS_DB_PATH: str = "users.db"
+
     # bioRxiv
     BIORXIV_MAX_RESULTS: int = 15
     BIORXIV_DAYS_BACK: int = 90

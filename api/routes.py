@@ -4,6 +4,9 @@ No business logic. No direct service calls.
 All work is delegated to the injected pipeline, orchestrator, or stores.
 
 Endpoints:
+  POST /auth/register       → AuthResponse          (register new user)
+  POST /auth/login          → AuthResponse          (login, returns JWT)
+  GET  /auth/me             → UserResponse          (current user info)
   POST /query              → QueryResponse        (backward-compatible)
   POST /query/rich         → RichQueryResponse    (structured, used by dashboard)
   GET  /paper/{pmid}       → dict                 (full paper metadata)
@@ -32,6 +35,7 @@ Endpoints:
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from core.pipeline import Pipeline
 from db.schemas import (
@@ -42,6 +46,7 @@ from db.schemas import (
     ArtifactResponse, VersionResponse, WorkspaceRequest,
     CommentRequest, WorkspaceResponse, WorkspaceMemberRequest,
     ShareArtifactRequest, AgentQueryRequest, AgentQueryResponse,
+    RegisterRequest, LoginRequest, AuthResponse, UserResponse,
 )
 from utils.logger import get_logger
 from agents.orchestrator import AgentTask, TaskType
@@ -49,6 +54,50 @@ from agents.orchestrator import AgentTask, TaskType
 logger = get_logger(__name__)
 
 router = APIRouter()
+_security = HTTPBearer(auto_error=False)
+
+
+# ── Auth helpers ────────────────────────────────────────────
+
+async def _get_auth_store(request: Request):
+    return request.app.state.auth_store
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+    auth_store=None,
+    request: Request = None,
+):
+    """Extract user from JWT token. Returns None for public endpoints."""
+    if credentials is None:
+        return None
+    from services.auth import AuthStore
+    store = auth_store or request.app.state.auth_store
+    payload = AuthStore.decode_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = store.get_user_by_id(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+async def require_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+    request: Request = None,
+):
+    """Require authenticated user. Raises 401 if not logged in."""
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from services.auth import AuthStore
+    store = request.app.state.auth_store
+    payload = AuthStore.decode_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    user = store.get_user_by_id(payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 def _get_pipeline(request: Request) -> Pipeline:
@@ -198,6 +247,46 @@ async def get_paper(pmid: str) -> dict:
 @router.get("/health", summary="Health check")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+# ── Auth endpoints ──────────────────────────────────────────
+
+@router.post("/auth/register", response_model=AuthResponse, summary="Register a new user")
+async def register(
+    body: RegisterRequest,
+    request: Request,
+) -> AuthResponse:
+    from services.auth import AuthStore
+    store = request.app.state.auth_store
+    user = store.register(body.username, body.email, body.password)
+    if not user:
+        raise HTTPException(status_code=400, detail="Username or email already exists")
+    token = AuthStore.create_token(user)
+    return AuthResponse(token=token, user_id=user.user_id, username=user.username)
+
+
+@router.post("/auth/login", response_model=AuthResponse, summary="Login with username and password")
+async def login(
+    body: LoginRequest,
+    request: Request,
+) -> AuthResponse:
+    from services.auth import AuthStore
+    store = request.app.state.auth_store
+    user = store.login(body.username, body.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = AuthStore.create_token(user)
+    return AuthResponse(token=token, user_id=user.user_id, username=user.username)
+
+
+@router.get("/auth/me", response_model=UserResponse, summary="Get current user info")
+async def get_me(
+    user=None,
+    request: Request = None,
+) -> UserResponse:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return UserResponse(**user.to_dict())
 
 
 # ── Agent endpoints ─────────────────────────────────────────
@@ -434,9 +523,14 @@ async def list_artifacts(
     request: Request,
     artifact_type: str = None,
     tag: str = None,
+    owner_id: str = None,
+    user=None,
 ) -> list:
     store = _get_version_store(request)
-    artifacts = store.list_artifacts(artifact_type=artifact_type, tag=tag)
+    # If authenticated and no explicit owner_id, show only user's artifacts
+    if user and not owner_id:
+        owner_id = user.user_id
+    artifacts = store.list_artifacts(artifact_type=artifact_type, tag=tag, owner_id=owner_id)
     return [a.dict() for a in artifacts]
 
 
@@ -444,13 +538,17 @@ async def list_artifacts(
 async def create_artifact(
     body: ArtifactRequest,
     request: Request,
+    user=None,
 ) -> ArtifactResponse:
     store = _get_version_store(request)
+    # Auto-set owner_id from authenticated user if not provided
+    owner = body.owner_id or (user.user_id if user else "")
     artifact = store.create_artifact(
         artifact_type=body.artifact_type,
         title=body.title,
         content=body.content,
         author=body.author,
+        owner_id=owner,
         tags=body.tags,
         message=body.message,
     )
@@ -521,8 +619,12 @@ async def get_artifact_comments(artifact_id: str, request: Request) -> list:
 async def list_workspaces(
     request: Request,
     username: str = None,
+    user=None,
 ) -> list:
     store = _get_collab_store(request)
+    # If authenticated and no explicit username, show only user's workspaces
+    if user and not username:
+        username = user.username
     workspaces = store.list_workspaces(username=username)
     return [w.dict() for w in workspaces]
 
@@ -531,12 +633,15 @@ async def list_workspaces(
 async def create_workspace(
     body: WorkspaceRequest,
     request: Request,
+    user=None,
 ) -> WorkspaceResponse:
     store = _get_collab_store(request)
+    # Auto-set created_by from authenticated user if not provided
+    creator = body.created_by or (user.username if user else "anonymous")
     ws = store.create_workspace(
         name=body.name,
         description=body.description,
-        created_by=body.created_by,
+        created_by=creator,
     )
     return WorkspaceResponse(**ws.dict())
 
