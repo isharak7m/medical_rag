@@ -5,11 +5,11 @@ import requests
 
 from ui import init_page, render_hero, API_BASE
 
-init_page("MyoCortex | Login", "🔐")
+init_page("MyoCortex | Login", "🔐", show_sidebar=False)
 
-# If already logged in, redirect to home
+# If already logged in, go to home
 if st.session_state.get("auth_token"):
-    st.switch_page("dashboard.py")
+    st.rerun()
 
 render_hero(
     "Welcome to MyoCortex",
@@ -52,8 +52,7 @@ if st.session_state["auth_mode"] == "login":
                 st.session_state["auth_token"] = data["token"]
                 st.session_state["auth_user_id"] = data["user_id"]
                 st.session_state["auth_username"] = data["username"]
-                st.success(f"Welcome back, {data['username']}!")
-                st.switch_page("dashboard.py")
+                st.rerun()
             elif resp.status_code == 401:
                 st.error("Invalid username or password.")
             else:
@@ -93,8 +92,7 @@ else:
                     st.session_state["auth_token"] = data["token"]
                     st.session_state["auth_user_id"] = data["user_id"]
                     st.session_state["auth_username"] = data["username"]
-                    st.success(f"Account created! Welcome, {data['username']}!")
-                    st.switch_page("dashboard.py")
+                    st.rerun()
                 elif resp.status_code == 400:
                     st.error("Username or email already exists.")
                 else:
@@ -104,7 +102,7 @@ else:
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ── Demo info ───────────────────────────────────────────────
+# ── Info ────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
     '<div class="empty-card">'

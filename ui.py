@@ -38,9 +38,14 @@ def is_logged_in() -> bool:
 
 
 def require_login():
-    """Redirect to login page if not authenticated."""
+    """Stop page rendering if not authenticated. User must navigate to Login page."""
     if not is_logged_in():
-        st.switch_page("pages/Login.py")
+        st.markdown(
+            '<div class="empty-card" style="margin-top:2rem;text-align:center;">'
+            'You are not signed in. Use the <strong>Sign In</strong> link in the sidebar to log in.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         st.stop()
 
 
@@ -323,11 +328,12 @@ def inject_theme() -> None:
     )
 
 
-def init_page(title: str, icon: str) -> None:
+def init_page(title: str, icon: str, show_sidebar: bool = True) -> None:
     st.set_page_config(page_title=title, page_icon=icon, layout="wide")
     inject_theme()
     init_state()
-    render_sidebar()
+    if show_sidebar:
+        render_sidebar()
 
 
 def init_state() -> None:
@@ -371,7 +377,7 @@ def render_sidebar() -> None:
                 st.session_state["auth_token"] = ""
                 st.session_state["auth_user_id"] = ""
                 st.session_state["auth_username"] = ""
-                st.switch_page("pages/Login.py")
+                st.rerun()
         else:
             st.page_link("pages/Login.py", label="Sign In")
 
