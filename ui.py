@@ -320,12 +320,14 @@ def render_sidebar() -> None:
             """,
             unsafe_allow_html=True,
         )
-        for label in ("Home", "Papers", "Claims", "Contradictions", "Evaluation", "KnowledgeGraph", "LiteratureReview", "Workspace"):
-            target = f"pages/{label}.py" if label != "Home" else "dashboard.py"
-            try:
-                st.page_link(target, label=label)
-            except StreamlitAPIException:
-                st.markdown(f"- {label}")
+        st.page_link("dashboard.py", label="Home")
+        st.page_link("pages/Papers.py", label="Papers")
+        st.page_link("pages/Claims.py", label="Claims")
+        st.page_link("pages/Contradictions.py", label="Contradictions")
+        st.page_link("pages/Evaluation.py", label="Evaluation")
+        st.page_link("pages/KnowledgeGraph.py", label="Knowledge Graph")
+        st.page_link("pages/LiteratureReview.py", label="Literature Review")
+        st.page_link("pages/Workspace.py", label="Workspace")
         st.caption(f"API base: {API_BASE}")
 
 

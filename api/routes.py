@@ -40,6 +40,7 @@ from db.schemas import (
     CommentRequest, WorkspaceResponse, AgentQueryRequest, AgentQueryResponse,
 )
 from utils.logger import get_logger
+from agents.orchestrator import AgentTask, TaskType
 
 logger = get_logger(__name__)
 
@@ -206,7 +207,6 @@ async def agent_query(
     body: AgentQueryRequest,
     request: Request,
 ) -> AgentQueryResponse:
-    from agents.orchestrator import TaskType
     orchestrator = _get_orchestrator(request)
     task_map = {
         "query": TaskType.QUERY,
@@ -265,7 +265,6 @@ async def build_knowledge_graph(
     request: Request,
 ) -> KnowledgeGraphResponse:
     orchestrator = _get_orchestrator(request)
-    # First get papers via pipeline
     pipeline = _get_pipeline(request)
     try:
         result = await pipeline.run_rich(body.query)
@@ -273,13 +272,21 @@ async def build_knowledge_graph(
         if hasattr(result, "evidence_cards"):
             for card in result.evidence_cards:
                 papers.append({"pmid": card.pmid, "title": card.title, "abstract": card.claim_text})
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"Pipeline failed during KG build: {exc}")
         papers = []
 
-    kg_result = await orchestrator.route(
-        TaskType.KNOWLEDGE_GRAPH_BUILD,
-        {"query": body.query, "papers": papers},
-    )
+    try:
+        kg_result = await orchestrator.route(
+            TaskType.KNOWLEDGE_GRAPH_BUILD,
+            {"query": body.query, "papers": papers},
+        )
+    except Exception as exc:
+        logger.error(f"KG orchestrator failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Knowledge graph build failed: {exc}",
+        )
     return KnowledgeGraphResponse(
         nodes=kg_result.get("graph", {}).get("nodes", []),
         edges=kg_result.get("graph", {}).get("edges", []),
@@ -307,13 +314,21 @@ async def get_knowledge_graph(
         if hasattr(result, "evidence_cards"):
             for card in result.evidence_cards:
                 papers.append({"pmid": card.pmid, "title": card.title, "abstract": card.claim_text})
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"Pipeline failed during KG build: {exc}")
         papers = []
 
-    kg_result = await orchestrator.route(
-        TaskType.KNOWLEDGE_GRAPH_BUILD,
-        {"query": query, "papers": papers},
-    )
+    try:
+        kg_result = await orchestrator.route(
+            TaskType.KNOWLEDGE_GRAPH_BUILD,
+            {"query": query, "papers": papers},
+        )
+    except Exception as exc:
+        logger.error(f"KG orchestrator failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Knowledge graph build failed: {exc}",
+        )
     return KnowledgeGraphResponse(
         nodes=kg_result.get("graph", {}).get("nodes", []),
         edges=kg_result.get("graph", {}).get("edges", []),
@@ -483,7 +498,6 @@ async def format_citations(
     request: Request,
 ) -> dict:
     from agents.citation_agent import CitationAgent
-    from agents.orchestrator import AgentTask, TaskType
     papers = body.get("papers", [])
     style = body.get("style", "apa")
     text = body.get("text")
