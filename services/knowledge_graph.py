@@ -142,17 +142,29 @@ class KnowledgeGraphService:
         texts = [(pmid, text, "") for pmid, text in papers_with_abstracts]
         relations = self.extract_relations(entities, texts)
 
-        # Filter to only entities that have relations
+        if not relations:
+            relations = self._extract_relations_heuristic(entities, texts)
+
         connected_ids: Set[str] = set()
         for r in relations:
             connected_ids.add(r.source_id)
             connected_ids.add(r.target_id)
 
         kg = KnowledgeGraph()
+        query_tokens = set(query.lower().split()) if query else set()
+
         for e in entities:
-            if e.id in connected_ids or len(connected_ids) == 0:
+            if e.id in connected_ids:
                 kg.entities[e.id] = e
+            elif query_tokens:
+                name_tokens = set(e.name.lower().split())
+                if name_tokens & query_tokens:
+                    kg.entities[e.id] = e
         kg.relations = relations
+
+        if not kg.entities and entities:
+            for e in entities[:10]:
+                kg.entities[e.id] = e
 
         logger.info(
             f"Knowledge graph: {len(kg.entities)} entities, {len(kg.relations)} relations"
@@ -176,27 +188,27 @@ class KnowledgeGraphService:
 
     def _regex_ner(self, text: str) -> List[Tuple[str, str]]:
         entities = []
-        # Disease patterns
         for m in re.finditer(
             r"\b(diabetes|cancer|obesity|hypertension|alzheimer|parkinson|"
             r"depression|anxiety|asthma|arthritis|stroke|inflammation|"
             r"atherosclerosis|dementia|epilepsy|migraine|hepatitis|"
-            r"osteoporosis|fibromyalgia|lupus|crohn|colitis)\b",
+            r"osteoporosis|fibromyalgia|lupus|crohn|colitis|"
+            r"heart failure|kidney disease|liver disease|"
+            r"cardiovascular disease|renal impairment)\b",
             text, re.IGNORECASE
         ):
             entities.append((m.group(1).title(), "Disease"))
 
-        # Drug/Chemical patterns
         for m in re.finditer(
             r"\b(metformin|aspirin|ibuprofen|creatine|omega-3|caffeine|"
-            r"vitamin\s*[A-Z]?|omega-3|resveratrol|curcumin|insulin|"
-            r"statin|antibiotic|corticosteroid|nsaid|acetaminophen|"
-            r"loratadine|omeprazole|metoprolol|lisinopril|amlodipine)\b",
+            r"vitamin\s*[A-Z]?|resveratrol|curcumin|insulin|"
+            r"statin|corticosteroid|nsaid|acetaminophen|"
+            r"loratadine|omeprazole|metoprolol|lisinopril|amlodipine|"
+            r"protein|whey|bcaa|glutamine|creatine monohydrate)\b",
             text, re.IGNORECASE
         ):
             entities.append((m.group(0).strip(), "Chemical"))
 
-        # Gene/protein patterns
         for m in re.finditer(
             r"\b(p53|BRCA[12]?|EGFR|KRAS|TP53|VEGF|mTOR|AMPK|SIRT[1-7]|"
             r"NF-?kB|TNF-?alpha?|IL-?[1-9]|FOXO[13]?|PGC-?1alpha?|"
@@ -204,6 +216,15 @@ class KnowledgeGraphService:
             text, re.IGNORECASE
         ):
             entities.append((m.group(0), "Gene"))
+
+        for m in re.finditer(
+            r"\b(muscle|strength|hypertrophy|endurance|performance|"
+            r"body composition|lean mass|fat mass|power|speed|"
+            r"grip strength|bench press|squat|deadlift|vo2max|"
+            r"recovery|fatigue|energy|testosterone|cortisol)\b",
+            text, re.IGNORECASE
+        ):
+            entities.append((m.group(1).title(), "Phenotype"))
 
         return entities
 
@@ -214,42 +235,54 @@ class KnowledgeGraphService:
     ) -> List[KGRelation]:
         relations = []
         entity_names = {e.name.lower(): e for e in entities}
+        entity_aliases = {}
+        for e in entities:
+            entity_aliases[e.name.lower()] = e
+            for word in e.name.lower().split():
+                if len(word) > 3 and word not in entity_aliases:
+                    entity_aliases[word] = e
 
-        # Process in batches of texts
         batch_size = 5
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
+            entity_list = ", ".join(f'"{e.name}" ({e.entity_type})' for e in entities[:20])
             prompt = (
-                "Given these biomedical entity pairs and the text context, "
-                "identify relationships between entities.\n\n"
-                f"Entities: {', '.join(e.name for e in entities[:30])}\n\n"
+                "You are a biomedical relationship extractor.\n"
+                f"Known entities: {entity_list}\n\n"
             )
             for pmid, text, _ in batch:
                 prompt += f"PMID {pmid}: {text[:600]}\n\n"
             prompt += (
-                "Return a JSON array of relationships. Each item: "
-                '{"source": "entity_name", "target": "entity_name", '
-                '"relation": "relates_to/treats/causes/associated_with/inhibits", '
-                '"evidence": "brief text", "pmid": "id"}\n'
-                "Return ONLY valid JSON array, no other text."
+                "Extract relationships between the known entities found in the text above.\n"
+                "Return a JSON array. Each item must have:\n"
+                '- "source": exact entity name from the list above\n'
+                '- "target": exact entity name from the list above\n'
+                '- "relation": one of "treats", "causes", "associated_with", "inhibits", "modulates", "relates_to"\n'
+                '- "evidence": the sentence that supports this relationship\n'
+                '- "pmid": the PubMed ID\n\n'
+                "Return ONLY a valid JSON array. No other text."
             )
 
             try:
                 result = self._llm_generate(prompt)
+                if isinstance(result, str):
+                    result = re.sub(r"```(?:json)?", "", result).strip().rstrip("`").strip()
                 parsed = json.loads(result) if isinstance(result, str) else result
                 if isinstance(parsed, list):
                     for item in parsed:
-                        src = item.get("source", "").lower()
-                        tgt = item.get("target", "").lower()
-                        if src in entity_names and tgt in entity_names:
+                        src_name = item.get("source", "").lower().strip()
+                        tgt_name = item.get("target", "").lower().strip()
+                        src_entity = entity_names.get(src_name) or entity_aliases.get(src_name)
+                        tgt_entity = entity_names.get(tgt_name) or entity_aliases.get(tgt_name)
+                        if src_entity and tgt_entity and src_entity.id != tgt_entity.id:
                             relations.append(
                                 KGRelation(
-                                    source_id=entity_names[src].id,
-                                    target_id=entity_names[tgt].id,
+                                    source_id=src_entity.id,
+                                    target_id=tgt_entity.id,
                                     relation_type=item.get("relation", "relates_to"),
-                                    evidence_text=item.get("evidence", ""),
+                                    evidence_text=item.get("evidence", "")[:200],
                                     pmid=item.get("pmid", ""),
-                                    confidence=0.7,
+                                    confidence=0.75,
                                 )
                             )
             except Exception as exc:
@@ -268,27 +301,38 @@ class KnowledgeGraphService:
 
         for pmid, text, _ in texts:
             text_lower = text.lower()
+            sentences = re.split(r'[.!?]+', text)
             found_in_text = [
                 e for e in entities if e.name.lower() in text_lower
             ]
+
             for i in range(len(found_in_text)):
                 for j in range(i + 1, len(found_in_text)):
                     e1, e2 = found_in_text[i], found_in_text[j]
-                    if e1.entity_type == e2.entity_type:
-                        continue
                     key = tuple(sorted([e1.id, e2.id]) + [pmid])
                     if key in seen:
                         continue
                     seen.add(key)
+
                     rel_type = _infer_relation_type(e1.entity_type, e2.entity_type)
+
+                    evidence = ""
+                    for sent in sentences:
+                        sent_lower = sent.lower()
+                        if e1.name.lower() in sent_lower and e2.name.lower() in sent_lower:
+                            evidence = sent.strip()[:200]
+                            break
+                    if not evidence:
+                        evidence = f"Co-occur in PMID {pmid}"
+
                     relations.append(
                         KGRelation(
                             source_id=e1.id,
                             target_id=e2.id,
                             relation_type=rel_type,
-                            evidence_text=f"Co-occur in PMID {pmid}",
+                            evidence_text=evidence,
                             pmid=pmid,
-                            confidence=0.5,
+                            confidence=0.6,
                         )
                     )
 
@@ -319,12 +363,19 @@ def _model_exists(model_name: str) -> bool:
 
 
 def _infer_relation_type(type1: str, type2: str) -> str:
-    if {type1, type2} == {"Chemical", "Disease"}:
+    pair = frozenset([type1, type2])
+    if pair == frozenset({"Chemical", "Disease"}):
         return "treats"
-    if {type1, type2} == {"Gene", "Disease"}:
+    if pair == frozenset({"Gene", "Disease"}):
         return "associated_with"
-    if {type1, type2} == {"Chemical", "Gene"}:
+    if pair == frozenset({"Chemical", "Gene"}):
         return "modulates"
+    if pair == frozenset({"Chemical", "Phenotype"}):
+        return "affects"
+    if pair == frozenset({"Chemical", "Chemical"}):
+        return "interacts_with"
     if "Anatomy" in (type1, type2):
         return "localized_in"
+    if pair == frozenset({"Phenotype", "Disease"}):
+        return "manifestation_of"
     return "relates_to"
