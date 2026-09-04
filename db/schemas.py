@@ -252,6 +252,15 @@ class CommentRequest(BaseModel):
     parent_comment_id: Optional[str] = None
 
 
+class WorkspaceMemberRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    role: str = Field(default="viewer", pattern="^(viewer|editor|admin)$")
+
+
+class ShareArtifactRequest(BaseModel):
+    artifact_id: str = Field(..., min_length=1)
+
+
 class WorkspaceResponse(BaseModel):
     workspace_id: str
     name: str

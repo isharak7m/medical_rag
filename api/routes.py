@@ -18,11 +18,14 @@ Endpoints:
   PUT  /artifacts/{id}     → ArtifactResponse
   GET  /artifacts/{id}/history → List[VersionResponse]
   POST /artifacts/{id}/comment → dict
+  GET  /artifacts/{id}/download → Response (markdown file)
   GET  /workspaces         → List[WorkspaceResponse]
   POST /workspaces         → WorkspaceResponse
   GET  /workspaces/{id}    → WorkspaceResponse
   POST /workspaces/{id}/comment → dict
   GET  /workspaces/{id}/comments → List[dict]
+  POST /workspaces/{id}/members → dict (add member)
+  POST /workspaces/{id}/share → dict (share artifact)
   POST /citations/format   → dict
 """
 
@@ -37,7 +40,8 @@ from db.schemas import (
     LiteratureReviewRequest, LiteratureReviewResponse,
     KnowledgeGraphResponse, ArtifactRequest, ArtifactUpdateRequest,
     ArtifactResponse, VersionResponse, WorkspaceRequest,
-    CommentRequest, WorkspaceResponse, AgentQueryRequest, AgentQueryResponse,
+    CommentRequest, WorkspaceResponse, WorkspaceMemberRequest,
+    ShareArtifactRequest, AgentQueryRequest, AgentQueryResponse,
 )
 from utils.logger import get_logger
 from agents.orchestrator import AgentTask, TaskType
@@ -572,6 +576,54 @@ async def get_workspace_comments(
     store = _get_collab_store(request)
     comments = store.get_comments(workspace_id, artifact_id=artifact_id)
     return [c.dict() for c in comments]
+
+
+@router.post("/workspaces/{workspace_id}/members", summary="Add member to workspace")
+async def add_workspace_member(
+    workspace_id: str,
+    body: WorkspaceMemberRequest,
+    request: Request,
+) -> dict:
+    store = _get_collab_store(request)
+    ws = store.get_workspace(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    member = store.add_member(workspace_id, body.username, body.role)
+    return member.dict()
+
+
+@router.post("/workspaces/{workspace_id}/share", summary="Share artifact to workspace")
+async def share_artifact_to_workspace(
+    workspace_id: str,
+    body: ShareArtifactRequest,
+    request: Request,
+) -> dict:
+    store = _get_collab_store(request)
+    ws = store.get_workspace(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    ok = store.share_artifact(workspace_id, body.artifact_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Artifact or workspace not found")
+    return {"success": True, "workspace_id": workspace_id, "artifact_id": body.artifact_id}
+
+
+@router.get("/artifacts/{artifact_id}/download", summary="Download artifact as markdown")
+async def download_artifact(
+    artifact_id: str,
+    request: Request,
+):
+    from fastapi.responses import Response
+    store = _get_version_store(request)
+    artifact = store.get_artifact(artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    filename = f"{artifact.title.replace(' ', '_')[:50]}.md"
+    return Response(
+        content=artifact.content,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # ── Citation formatting endpoint ────────────────────────────
