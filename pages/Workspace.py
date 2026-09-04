@@ -5,6 +5,42 @@ import requests
 
 from ui import init_page, render_hero, render_metric_card, API_BASE
 
+
+def extract_text_from_file(uploaded_file) -> str:
+    """Extract text content from uploaded files."""
+    name = uploaded_file.name.lower()
+
+    if name.endswith(".txt") or name.endswith(".md"):
+        return uploaded_file.read().decode("utf-8", errors="replace")
+
+    if name.endswith(".pdf"):
+        try:
+            import PyPDF2
+            reader = PyPDF2.PdfReader(uploaded_file)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            return text
+        except ImportError:
+            return "[PDF upload requires PyPDF2: pip install PyPDF2]"
+        except Exception as e:
+            return f"[PDF extraction failed: {e}]"
+
+    if name.endswith(".docx"):
+        try:
+            from docx import Document
+            doc = Document(uploaded_file)
+            return "\n".join(p.text for p in doc.paragraphs)
+        except ImportError:
+            return "[DOCX upload requires python-docx: pip install python-docx]"
+        except Exception as e:
+            return f"[DOCX extraction failed: {e}]"
+
+    if name.endswith(".csv"):
+        return uploaded_file.read().decode("utf-8", errors="replace")
+
+    return uploaded_file.read().decode("utf-8", errors="replace")
+
 init_page("MyoCortex | Research Workspace", "WS")
 
 render_hero(
@@ -19,10 +55,37 @@ tab_artifacts, tab_workspace = st.tabs(["Research Artifacts", "Collaboration Wor
 with tab_artifacts:
     st.markdown('<div class="section-title">Create Artifact</div>', unsafe_allow_html=True)
 
+    upload_mode = st.radio(
+        "Input method",
+        ["Type content", "Upload document"],
+        horizontal=True,
+        key="artifact_input_mode",
+    )
+
+    uploaded_content = ""
+
+    if upload_mode == "Upload document":
+        uploaded_file = st.file_uploader(
+            "Upload a document",
+            type=["txt", "md", "pdf", "docx", "csv"],
+            help="Supported formats: TXT, MD, PDF, DOCX, CSV",
+            key="artifact_file_uploader",
+        )
+        if uploaded_file:
+            uploaded_content = extract_text_from_file(uploaded_file)
+            st.success(f"Extracted {len(uploaded_content)} characters from {uploaded_file.name}")
+            with st.expander("Preview uploaded content"):
+                st.text_area("Preview", uploaded_content[:2000], height=200, disabled=True, key="file_preview")
+
     with st.form("artifact-form"):
         art_type = st.selectbox("Type", ["note", "hypothesis", "manuscript", "review"])
         title = st.text_input("Title", placeholder="Brief descriptive title")
-        content = st.text_area("Content", height=200, placeholder="Write your research artifact here...")
+
+        if upload_mode == "Type content":
+            content = st.text_area("Content", height=200, placeholder="Write your research artifact here...")
+        else:
+            content = uploaded_content if uploaded_content else st.text_area("Content (from upload)", height=200, disabled=True)
+
         author = st.text_input("Author", value="researcher")
         tags_input = st.text_input("Tags (comma-separated)", placeholder="creatine, meta-analysis, safety")
         message = st.form_submit_button("Create Artifact")
