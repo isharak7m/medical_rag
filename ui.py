@@ -40,6 +40,15 @@ def is_logged_in() -> bool:
 def require_login():
     """Show inline login form if not authenticated, then stop page rendering."""
     if not is_logged_in():
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] { display: none !important; }
+            div[data-testid="stSidebarNav"] { display: none !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         st.markdown('<div class="section-title">Sign In Required</div>', unsafe_allow_html=True)
         with st.form("inline-login", clear_on_submit=False):
             li_user = st.text_input("Username", key="li_user")

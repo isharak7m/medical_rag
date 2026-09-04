@@ -21,6 +21,15 @@ init_state()
 # NOT LOGGED IN — show login/register form, NO sidebar
 # ══════════════════════════════════════════════════════════════
 if not is_logged_in():
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] { display: none !important; }
+        div[data-testid="stSidebarNav"] { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     render_hero(
         "Welcome to MyoCortex",
         "Biomedical evidence explorer with multi-agent orchestration, knowledge graphs, and collaborative research workspaces.",
