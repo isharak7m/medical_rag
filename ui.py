@@ -38,11 +38,31 @@ def is_logged_in() -> bool:
 
 
 def require_login():
-    """Stop page rendering if not authenticated. User must navigate to Login page."""
+    """Show inline login form if not authenticated, then stop page rendering."""
     if not is_logged_in():
+        st.markdown('<div class="section-title">Sign In Required</div>', unsafe_allow_html=True)
+        with st.form("inline-login", clear_on_submit=False):
+            li_user = st.text_input("Username", key="li_user")
+            li_pass = st.text_input("Password", type="password", key="li_pass")
+            li_sub = st.form_submit_button("Sign In", use_container_width=True)
+        if li_sub and li_user and li_pass:
+            try:
+                resp = requests.post(f"{API_BASE}/auth/login", json={
+                    "username": li_user, "password": li_pass,
+                }, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    st.session_state["auth_token"] = data["token"]
+                    st.session_state["auth_user_id"] = data["user_id"]
+                    st.session_state["auth_username"] = data["username"]
+                    st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+            except Exception as e:
+                st.error(f"Error: {e}")
         st.markdown(
-            '<div class="empty-card" style="margin-top:2rem;text-align:center;">'
-            'You are not signed in. Use the <strong>Sign In</strong> link in the sidebar to log in.'
+            '<div class="empty-card" style="margin-top:1rem;">'
+            'Or go to the <a href="/" style="color:var(--accent);">home page</a> to register a new account.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -374,12 +394,9 @@ def render_sidebar() -> None:
                 unsafe_allow_html=True,
             )
             if st.button("Sign Out", use_container_width=True):
-                st.session_state["auth_token"] = ""
-                st.session_state["auth_user_id"] = ""
-                st.session_state["auth_username"] = ""
+                for key in ["auth_token", "auth_user_id", "auth_username"]:
+                    st.session_state[key] = ""
                 st.rerun()
-        else:
-            st.page_link("pages/Login.py", label="Sign In")
 
         st.caption(f"API base: {API_BASE}")
 
