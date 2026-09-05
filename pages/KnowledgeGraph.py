@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 import requests
-import json
+from streamlit_agraph import agraph, Node, Edge, Config
 
 from ui import init_page, render_hero, render_metric_card, API_BASE, get_auth_headers, require_login
 
@@ -31,7 +31,7 @@ if submitted and query:
             if resp.status_code == 200:
                 data = resp.json()
                 st.session_state["kg_data"] = data
-                st.success(f"Knowledge graph built: {data.get('entity_count', 0)} entities, {data.get('relation_count', 0)} relations")
+                st.success(f"Built: {data.get('entity_count', 0)} entities, {data.get('relation_count', 0)} relations")
             else:
                 st.error(f"API error: {resp.status_code}")
         except Exception as e:
@@ -54,35 +54,95 @@ if kg_data:
             with type_cols[i]:
                 render_metric_card(etype, count, f"{etype} entities found")
 
-    top_entities = kg_data.get("top_entities", [])
-    if top_entities:
-        st.markdown('<div class="section-title">Top Entities</div>', unsafe_allow_html=True)
-        for ent in top_entities[:15]:
-            sources = len(ent.get("sources", [])) if isinstance(ent.get("sources"), list) else ent.get("sources", 0)
-            st.markdown(
-                f"""
-                <div class="evidence-card">
-                    <div class="card-topline">
-                        <div class="card-title">{ent.get('name', 'Unknown')}</div>
-                        <div class="stance-pill stance-support">{ent.get('type', 'Unknown')}</div>
-                    </div>
-                    <div class="muted small">ID: {ent.get('id', 'N/A')} | Sources: {sources} paper(s)</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    nodes_data = kg_data.get("nodes", [])
+    edges_data = kg_data.get("edges", [])
 
-    nodes = kg_data.get("nodes", [])
-    edges = kg_data.get("edges", [])
-    if nodes:
+    if nodes_data:
         st.markdown('<div class="section-title">Graph Visualization</div>', unsafe_allow_html=True)
-        graph_json = json.dumps({"nodes": nodes, "edges": edges}, indent=2)
-        st.code(graph_json, language="json")
-        st.caption(f"{len(nodes)} nodes and {len(edges)} edges. Full data via API: GET /api/v1/kg/graph/{query}")
 
-    if edges:
+        TYPE_COLORS = {
+            "Disease": "#ff8d8d",
+            "Drug": "#62f2bc",
+            "Gene": "#8cb8ff",
+            "Protein": "#ffd66e",
+            "Compound": "#c49bff",
+            "Phenotype": "#ff9de2",
+            "Intervention": "#6ee7d8",
+            "Outcome": "#ffd280",
+            "Nutrient": "#a8e6cf",
+            "Supplement": "#dcedc1",
+        }
+        DEFAULT_COLOR = "#9fb1c8"
+
+        nodes = []
+        for n in nodes_data:
+            ntype = n.get("type", "Unknown")
+            color = TYPE_COLORS.get(ntype, DEFAULT_COLOR)
+            label = n.get("name", n.get("id", "?"))
+            title = f"{label}\nType: {ntype}"
+            if n.get("sources"):
+                src_count = len(n["sources"]) if isinstance(n["sources"], list) else n["sources"]
+                title += f"\nSources: {src_count} paper(s)"
+            nodes.append(Node(
+                id=n.get("id", label),
+                label=label,
+                title=title,
+                color=color,
+                size=max(15, min(40, 15 + (len(n.get("sources", [])) if isinstance(n.get("sources"), list) else 0) * 5)),
+            ))
+
+        edges = []
+        for e in edges_data:
+            src = e.get("source", "")
+            tgt = e.get("target", "")
+            rel = e.get("relation", "")
+            evidence = e.get("evidence", "")
+            edges.append(Edge(
+                source=src,
+                target=tgt,
+                label=rel,
+                title=evidence,
+                color="#557799",
+                arrows="to",
+            ))
+
+        config = Config(
+            width="100%",
+            height=550,
+            directed=True,
+            physics={
+                "enabled": True,
+                "forceAtlas2Based": {
+                    "gravitationalConstant": -50,
+                    "centralGravity": 0.01,
+                    "springLength": 120,
+                    "springConstant": 0.06,
+                },
+                "solver": "forceAtlas2Based",
+                "stabilization": {"iterations": 150},
+            },
+            interaction={
+                "hover": True,
+                "zoomView": True,
+                "dragView": True,
+                "multiselect": True,
+            },
+            node={
+                "font": {"size": 13, "color": "#f4f7fb", "strokeWidth": 3, "strokeColor": "#000000"},
+                "borderWidth": 2,
+                "borderWidthSelected": 4,
+            },
+            edge={
+                "font": {"size": 10, "color": "#9fb1c8", "align": "middle"},
+                "smooth": {"type": "continuous"},
+            },
+        )
+
+        agraph(nodes=nodes, edges=edges, config=config)
+
+    if edges_data:
         st.markdown('<div class="section-title">Relationships</div>', unsafe_allow_html=True)
-        for edge in edges[:20]:
+        for edge in edges_data[:20]:
             src = edge.get("source", "")
             tgt = edge.get("target", "")
             rel = edge.get("relation", "")
