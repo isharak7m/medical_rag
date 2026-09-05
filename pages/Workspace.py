@@ -69,28 +69,30 @@ if ws_action == "My Artifacts":
         key="artifact_create_mode",
     )
 
+    if create_mode == "Upload file":
+        uploaded_file = st.file_uploader(
+            "Upload document",
+            type=["txt", "md", "pdf", "docx", "csv"],
+            help="TXT, MD, PDF, DOCX, CSV",
+            key="artifact_upload",
+        )
+        if uploaded_file:
+            uploaded_content = extract_text_from_file(uploaded_file)
+            st.session_state["uploaded_artifact_content"] = uploaded_content
+            st.success(f"Extracted {len(uploaded_content)} characters from {uploaded_file.name}")
+    else:
+        st.session_state["uploaded_artifact_content"] = ""
+
     with st.form("artifact-form", clear_on_submit=True):
         art_type = st.selectbox("Type", ["note", "hypothesis", "manuscript", "review"])
         title = st.text_input("Title", placeholder="Brief descriptive title")
 
-        uploaded_content = ""
-        if create_mode == "Upload file":
-            uploaded_file = st.file_uploader(
-                "Upload document",
-                type=["txt", "md", "pdf", "docx", "csv"],
-                help="TXT, MD, PDF, DOCX, CSV",
-                key="artifact_upload",
-            )
-            if uploaded_file:
-                uploaded_content = extract_text_from_file(uploaded_file)
-                st.info(f"Extracted {len(uploaded_content)} characters from {uploaded_file.name}")
-
+        existing_content = st.session_state.get("uploaded_artifact_content", "")
         content = st.text_area(
             "Content",
             height=200,
-            placeholder="Write your research artifact here..." if create_mode == "Type content" else "Content from upload",
-            value=uploaded_content,
-            disabled=(create_mode == "Upload file" and uploaded_content),
+            placeholder="Write your research artifact here..." if not existing_content else "Content loaded from upload",
+            value=existing_content,
         )
 
         author = st.text_input("Author", value="researcher")
@@ -108,6 +110,7 @@ if ws_action == "My Artifacts":
                 "tags": tags,
             }, headers=get_auth_headers(), timeout=10)
             if resp.status_code == 200:
+                st.session_state["uploaded_artifact_content"] = ""
                 st.success(f"Created: {resp.json().get('artifact_id')}")
                 st.rerun()
             else:
@@ -175,7 +178,7 @@ if ws_action == "My Artifacts":
                             key=f"update_mode-{art['artifact_id']}",
                         )
 
-                        new_content = ""
+                        update_key = f"update_content_{art['artifact_id']}"
                         if update_mode == "Upload file":
                             update_file = st.file_uploader(
                                 "Upload updated document",
@@ -183,14 +186,15 @@ if ws_action == "My Artifacts":
                                 key=f"update_file-{art['artifact_id']}",
                             )
                             if update_file:
-                                new_content = extract_text_from_file(update_file)
-                                st.info(f"Extracted {len(new_content)} characters")
+                                st.session_state[update_key] = extract_text_from_file(update_file)
+                                st.success(f"Extracted {len(st.session_state[update_key])} characters")
 
                         with st.form(key=f"update-{art['artifact_id']}"):
                             if update_mode == "Type content":
                                 new_content = st.text_area("New content", value=art.get("content", ""), height=150)
                             else:
-                                st.text_area("Content preview", value=new_content[:1000] if new_content else "Upload a file above", height=100, disabled=True)
+                                existing = st.session_state.get(update_key, "")
+                                new_content = st.text_area("Content from upload", value=existing, height=150)
 
                             update_msg = st.text_input("Update message", value="Updated")
                             update_btn = st.form_submit_button("Save Version")
@@ -203,6 +207,7 @@ if ws_action == "My Artifacts":
                                         timeout=10,
                                     )
                                     if up_resp.status_code == 200:
+                                        st.session_state.pop(update_key, None)
                                         st.success("Updated!")
                                         st.rerun()
                                 except Exception as e:
